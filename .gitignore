@@ -1,5 +1,7 @@
-# Created by https://www.toptal.com/developers/gitignore/api/python,macos,vim,visualstudiocode,linux,windows
-# Edit at https://www.toptal.com/developers/gitignore?templates=python,macos,vim,visualstudiocode,linux,windows
+# data directory
+data
+
+# Following was created by https://www.toptal.com/developers/gitignore/api/python,macos,vim,visualstudiocode,linux,windows
 
 ### Linux ###
 *~
