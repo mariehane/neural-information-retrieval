@@ -40,7 +40,6 @@ print(embeddings)
 
 # Compute relevant statistics:
 print("Nr. of articles:", len(metadata))
-print("Article length:", len(metadata))
 
 print("Nr. of assessed documents per topic:")
 print(qrels_train.groupby('topic_number').count().iloc[:,0])
@@ -48,50 +47,7 @@ print(qrels_train.groupby('topic_number').count().iloc[:,0])
 archive = zipfile.ZipFile("data/document_parses.zip", "r")
 doc = archive.open("document_parses/pmc_json/PMC7091850.xml.json")
 #doc = archive.open("document_parses/pdf_json/6b638fb47bfb48465ec020cfc22a6254d696dfc9.json")
-
-data = json.load(doc)
-pprint(data["body_text"])
-# 1. Indexing
-# TODO: Compute relevant statistics: 
-#        - article length
-#        - nr. of assessed documents per topic, average topic length
-#        - etc.
-# TODO: Index the dataset with Terrier, Indri, Elasticsearch, etc.
-# TODO: Try diff. approaches to optimize index and see impact of each approach
-#       - stopword removal
-#       - stemming
-#       - lemmatization
-#       - etc.
-# TODO: Extract information about index
-#       - nr. of docs indexed
-#       - nr. of unique terms
-#       - total nr. of terms
-#       - index size
-#       - etc.
-# 2. Ranking models
-# TODO: Split into 2:1 train/validation folds
-# TODO: Once you find the best configuration, train on the full data
-# TODO: Tune and run BM25
-# TODO: Tune and run a language model, that ranks docs based on the probability of the model generating the query
-# TODO: Try some rank fusion approaches to combined different retrieval model results.
-#       - CombSum
-#       - CombMNZ
-#       - BordaCount
-#       - etc.
-# TODO: Expand with even more complex ideas of your own.
-# 3. Advanced Topics in Information Retrieval
-# TODO: Use word embeddings to do query expansion as done by Kuzi et al. 
-# TODO: Use BM25 or something similar to generate an initial ranking, and then re-rank the top K documents using contextual embeddings. 
-# TODO: Look at recent approaches proposed for the TREC-COVID track and evaluate their approaches (no need to reimplement/retrain models, just evaluate them) 
-#       - 
-# TODO: Tune and run at least 1 learning-to-rank approach
-#       - RankNet
-#       - LambdaMART
-#       - etc.
-# 4. Evaluation
-# TODO: use trec-eval: https://github.com/usnistgov/trec_eval
-# TODO: Report MAP and NDCG at cut-offs of 5, 10, 20.
-# TODO: possibly report more metrics
-# TODO: report mean response times of your systems
-# 4.1 Real-World Use Case
-# TODO: Output submissions in the TREC run format
+doc_json = json.load(doc)
+text_elems = [ elem["text"] for elem in doc_json["body_text"] ]
+text = "\n".join(text_elems)
+print("Length of chosen article:", len(text))
