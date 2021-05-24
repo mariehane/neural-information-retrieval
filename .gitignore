@@ -1,6 +1,9 @@
 # data directory
 data
 
+# PyTerrier index directory
+indexes
+
 # Following was created by https://www.toptal.com/developers/gitignore/api/python,macos,vim,visualstudiocode,linux,windows
 
 ### Linux ###
