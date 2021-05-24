@@ -1,11 +1,14 @@
 import sys
+import time
 import json
 import zipfile
 import xmltodict
+import pytrec_eval
 import numpy as np
 import pandas as pd
 import pyterrier as pt
 from pprint import pprint
+from pathlib import Path
 
 from data import Cord19Dataset
 
@@ -26,30 +29,97 @@ df["text"] = pd.DataFrame(map(try_get_text, range(n_papers)))
 df = df.replace({np.nan: None})
 df = df.astype(str)
 
+# TODO: Index the dataset with Terrier, Indri, Elasticsearch, etc.
+# TODO: Try diff. approaches to optimize index and see impact of each approach
+#       - stemming
+#       - lemmatization
+indexes = [
+    {
+        "name": "Default, abstracts",
+        "folder_name": "default_abstract",
+        "text": df["abstract"],
+        "metadata": [
+            df["cord_uid"],
+            df["title"]
+            #df["publish_time"],
+            #df["journal"])
+        ],
+        "stopwords_removal": True,
+        "tokeniser": "EnglishTokeniser", # UTFTokenizer
+        "store_positions": False
+    },
+    {
+        "name": "Default, full paper text",
+        "folder_name": "default_text",
+        "text": df["text"],
+        "metadata": [
+            df["cord_uid"],
+            df["title"]
+        ],
+        "stopwords_removal": True,
+        "tokeniser": "EnglishTokeniser",
+        "store_positions": False
+    },
+    {
+        "name": "Abstracts, store positions",
+        "folder_name": "positions_abstract",
+        "text": df["abstract"],
+        "metadata": [
+            df["cord_uid"],
+            df["title"]
+        ],
+        "stopwords_removal": True,
+        "tokeniser": "EnglishTokeniser",
+        "store_positions": True
+    },
+    {
+        "name": "Full texts, store positions",
+        "folder_name": "positions_text",
+        "text": df["text"],
+        "metadata": [
+            df["cord_uid"],
+            df["title"]
+        ],
+        "stopwords_removal": True,
+        "tokeniser": "EnglishTokeniser",
+        "store_positions": True
+    },
+]
+
 print("> Indexing...")
 if not pt.started():
     pt.init()
 
-index_path = "./indexes/default"
-indexer = pt.DFIndexer(index_path, overwrite=True)
-index_ref = indexer.index(df["abstract"], df["cord_uid"], df["title"])#, df["publish_time"], df["journal"])
-index_ref.toString()
+for index_dict in indexes:
+    print("- Creating index:", index_dict["name"])
+    index_path = str(Path("./indexes") / index_dict["folder_name"])
+    print("- Directory:", index_path)
 
-index = pt.IndexFactory.of(index_ref)
+    indexer = pt.DFIndexer("./" + index_path, overwrite=True, blocks=index_dict["store_positions"])
+    if not index_dict["stopwords_removal"]:
+        indexer.setProperty("termpipelines", "")
+    if index_dict["tokeniser"] != "EnglishTokeniser":
+        indexer.setProperty("tokeniser", index_dict["tokeniser"])
 
-# TODO: Index the dataset with Terrier, Indri, Elasticsearch, etc.
-# TODO: Try diff. approaches to optimize index and see impact of each approach
-#       - stopword removal
-#       - stemming
-#       - lemmatization
-#       - etc.
+    start = time.time()
+    index_ref = indexer.index(index_dict["text"], *index_dict["metadata"])
+    end = time.time()
 
-# TODO: Extract information about index
-#       - nr. of docs indexed
-#       - nr. of unique terms
-#       - total nr. of terms
-#       - index size
-#       - etc.
+    index = pt.IndexFactory.of(index_ref)
+    stats = index.getCollectionStatistics()
+    print("- Time to index:", round(end-start, 2), "s")
+    print("- No. of docs indexed:", stats.numberOfDocuments)
+    print("- No. of unique terms:", stats.numberOfUniqueTerms)
+    print("- Total no. of terms:", stats.numberOfTokens)
+
+    index_size = sum(f.stat().st_size for f in Path(index_path).glob('**/*') if f.is_file())
+    index_size_mb = round(index_size / 1024**2, 1)
+
+    print("- Index size: ", index_size_mb, "MB")
+    print()
+
+sys.exit(0)
+
 # 2. Ranking models
 # TODO: Split into 2:1 train/validation folds
 # TODO: Once you find the best configuration, train on the full data
@@ -61,6 +131,8 @@ index = pt.IndexFactory.of(index_ref)
 #       - BordaCount
 #       - etc.
 # TODO: Expand with even more complex ideas of your own.
+
+
 # 3. Advanced Topics in Information Retrieval
 # TODO: Use word embeddings to do query expansion as done by Kuzi et al. 
 # TODO: Use BM25 or something similar to generate an initial ranking, and then re-rank the top K documents using contextual embeddings. 
