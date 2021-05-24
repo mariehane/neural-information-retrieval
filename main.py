@@ -16,7 +16,7 @@ print("> Loading dataset")
 dataset = Cord19Dataset(base_dir='data', download=True)
 
 print("> Creating simple dataframe...")
-n_papers = len(dataset.metadata)
+n_papers = 25_000 #len(dataset.metadata)
 df = dataset.metadata.loc[:n_papers, ["cord_uid","title","abstract","publish_time","journal"]]
 
 def try_get_text(i):
