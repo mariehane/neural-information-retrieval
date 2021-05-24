@@ -52,6 +52,8 @@ class Cord19Dataset():
             path = self.metadata.loc[paper_index, "pdf_json_files"]
             if (type(path) is not str):
                 raise RuntimeError(f"Paper {paper_index} does not have any PMC/PDF json parses associated with it!")
+        if (";" in path):
+            path = path.split(";")[0]
 
         with self.document_parses_zip.open(path) as doc:
             data = json.load(doc)
