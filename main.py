@@ -4,24 +4,46 @@ import zipfile
 import xmltodict
 import numpy as np
 import pandas as pd
+import pyterrier as pt
 from pprint import pprint
 
 from data import Cord19Dataset
 
 print("> Loading dataset")
 dataset = Cord19Dataset(base_dir='data', download=True)
-dataset.get_paper_text(paper_index=0)
-# 1. Indexing
-# TODO: Compute relevant statistics: 
-#        - article length
-#        - nr. of assessed documents per topic, average topic length
-#        - etc.
+
+print("> Creating simple dataframe...")
+n_papers = len(dataset.metadata)
+df = dataset.metadata.loc[:n_papers, ["cord_uid","title","abstract","publish_time","journal"]]
+
+def try_get_text(i):
+    try:
+        return dataset.get_paper_text(i)
+    except RuntimeError:
+        return None
+
+df["text"] = pd.DataFrame(map(try_get_text, range(n_papers)))
+df = df.replace({np.nan: None})
+df = df.astype(str)
+
+print("> Indexing...")
+if not pt.started():
+    pt.init()
+
+index_path = "./indexes/default"
+indexer = pt.DFIndexer(index_path, overwrite=True)
+index_ref = indexer.index(df["abstract"], df["cord_uid"], df["title"])#, df["publish_time"], df["journal"])
+index_ref.toString()
+
+index = pt.IndexFactory.of(index_ref)
+
 # TODO: Index the dataset with Terrier, Indri, Elasticsearch, etc.
 # TODO: Try diff. approaches to optimize index and see impact of each approach
 #       - stopword removal
 #       - stemming
 #       - lemmatization
 #       - etc.
+
 # TODO: Extract information about index
 #       - nr. of docs indexed
 #       - nr. of unique terms
