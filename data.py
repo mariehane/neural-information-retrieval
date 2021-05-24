@@ -32,11 +32,8 @@ class Cord19Dataset():
             3: "judgement",
         }, inplace=True)
 
-        with open(self.topics_train_path, "r") as f:
-            self.topics_train = xmltodict.parse(f.read())
-
-        with open(self.topics_test_path, "r") as f:
-            self.topics_test = xmltodict.parse(f.read())
+        self.topics_train = self._get_topics_df(self.topics_train_path)
+        self.topics_test = self._get_topics_df(self.topics_test_path)
 
         self.document_parses_zip = zipfile.ZipFile(self.document_parses_path, "r")
 
@@ -45,6 +42,18 @@ class Cord19Dataset():
         #    0: 'cord_uid'
         #}, inplace=True)
 
+    def _get_topics_df(self, topics_xml_path):
+        with open(topics_xml_path, "r") as f:
+            xml_dict = xmltodict.parse(f.read())
+
+            topics_df = []
+            for topic in xml_dict["topics"]["topic"]:
+                topics_df.append([topic["@number"], topic["query"], topic["question"], topic["narrative"]])
+
+            topics_df = pd.DataFrame(topics_df, columns=["topic_number", "query", "question", "narrative"])
+            #topics_df.set_index("topic_number", inplace=True)
+
+            return topics_df
 
     def get_paper_text(self, paper_index):
         path = self.metadata.loc[paper_index, "pmc_json_files"]
