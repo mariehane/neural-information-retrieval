@@ -21,6 +21,8 @@ df = dataset.metadata.loc[:n_papers, ["cord_uid","title","abstract","publish_tim
 
 def try_get_text(i):
     try:
+        if (i+1) % 10_000 == 0:
+            print("- Loading text from paper no.", i+1)
         return dataset.get_paper_text(i)
     except RuntimeError:
         return None
