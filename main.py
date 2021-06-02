@@ -153,9 +153,29 @@ for index_dict in indexes:
     print("- Index size: ", index_size_mb, "MB")
     print()
 
+
 sys.exit(0)
 
 # 2. Ranking models
+tf = pt.BatchRetrieve(index, wmodel="Tf")
+tf.search("algorithm")
+
+bm25 = pt.BatchRetrieve(index, wmodel="BM25")  # default parameters
+bm25v2 = pt.BatchRetrieve(index, wmodel="BM25", controls={"c": 0.1, "bm25.k_1": 2.0, "bm25.k_3": 10})
+bm25v3 = pt.BatchRetrieve(index, wmodel="BM25", controls={"c": 8, "bm25.k_1": 1.4, "bm25.k_3": 10})
+
+topics = dataset.topics_train.rename(columns={
+    "topic_number": "qid",
+}).drop(columns=["question", "narrative"])
+
+qrels = dataset.qrels_train.rename(columns={
+    "topic_number": "qid",
+    "cord_uid": "docno",
+    "judgement": "label"
+}).drop(columns=["iteration"]).astype({"qid": str})
+qrels = qrels.merge(df["docno"]) # drop qrels that are not in the dataset
+
+
 # TODO: Split into 2:1 train/validation folds
 # TODO: Once you find the best configuration, train on the full data
 # TODO: Tune and run BM25
@@ -172,11 +192,11 @@ sys.exit(0)
 # TODO: Use word embeddings to do query expansion as done by Kuzi et al. 
 # TODO: Use BM25 or something similar to generate an initial ranking, and then re-rank the top K documents using contextual embeddings. 
 # TODO: Look at recent approaches proposed for the TREC-COVID track and evaluate their approaches (no need to reimplement/retrain models, just evaluate them) 
-#       - 
 # TODO: Tune and run at least 1 learning-to-rank approach
 #       - RankNet
 #       - LambdaMART
 #       - etc.
+
 # 4. Evaluation
 # TODO: use trec-eval: https://github.com/usnistgov/trec_eval
 # TODO: Report MAP and NDCG at cut-offs of 5, 10, 20.
@@ -184,3 +204,10 @@ sys.exit(0)
 # TODO: report mean response times of your systems
 # 4.1 Real-World Use Case
 # TODO: Output submissions in the TREC run format
+
+pt.Experiment(
+    retr_systems=[tf, bm25, bm25v2, bm25v3],
+    names=['TF', 'BM25', 'BM25 (0.1, 2.0, 10)', 'BM25 (8, 1.4, 10)'],
+    topics=topics,
+    qrels=qrels,
+    eval_metrics=["map", "ndcg_cut_5", "ndcg_cut_10", "ndcg_cut_20"])
