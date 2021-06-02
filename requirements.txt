@@ -6,3 +6,9 @@ torchvision==0.9.1
 xmltodict==0.12.0
 python-terrier==0.5.0
 scikit-learn==0.24.2
+spacy==3.0.6
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.0.0/en_core_web_sm-3.0.0.tar.gz#egg=en_core_web_sm
+tqdm==4.60.0
+nltk==3.4
+textblob==0.15.3
+lemminflect==0.2.2

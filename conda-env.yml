@@ -8,5 +8,10 @@ dependencies:
   - pandas
   - pytorch
   - torchvision
-  - xmltodict
   - torchaudio
+  - xmltodict
+  - spacy
+  - nltk
+  - textblob
+  - pattern
+  - lemminflect
