@@ -4,6 +4,8 @@ import json
 import zipfile
 import xmltodict
 import pytrec_eval
+import spacy
+import tqdm
 import numpy as np
 import pandas as pd
 import pyterrier as pt
@@ -11,25 +13,42 @@ from pprint import pprint
 from pathlib import Path
 
 from data import Cord19Dataset
+from preprocess import lemmatize_wordnet, stem_porter, stem_snowball, lemmatize_lemminflect
+from index import TerrierIndex
 
 print("> Loading dataset")
 dataset = Cord19Dataset(base_dir='data', download=True)
+n_papers = 5_000 #len(dataset.metadata)
 
 print("> Creating simple dataframe...")
-n_papers = 25_000 #len(dataset.metadata)
-df = dataset.metadata.loc[:n_papers, ["cord_uid","title","abstract","publish_time","journal"]]
+df = dataset.get_dataframe(n_papers, show_progressbar=True)
+print(df)
 
-def try_get_text(i):
-    try:
-        if (i+1) % 10_000 == 0:
-            print("- Loading text from paper no.", i+1)
-        return dataset.get_paper_text(i)
-    except RuntimeError:
-        return None
+print("> Preprocessing with NLTK lemmatizers")
 
-df["text"] = pd.DataFrame(map(try_get_text, range(n_papers)))
-df = df.replace({np.nan: None})
-df = df.astype(str)
+print("- Using WordNet Stemmer")
+start = time.time()
+df["abstract_wordnet"] = lemmatize_wordnet(df["abstract"], show_progressbar=True)
+print(df["abstract_wordnet"])
+print("- Took", round(time.time() - start, 2), "s")
+
+print("- Using Porter Stemmer")
+start = time.time()
+df["abstract_porter"] = stem_porter(df["abstract"], show_progressbar=True)
+print(df["abstract_porter"])
+print("- Took", round(time.time() - start, 2), "s")
+
+print("- Using Snowball Stemmer")
+start = time.time()
+df["abstract_snowball"] = stem_porter(df["abstract"], show_progressbar=True)
+print(df["abstract_snowball"])
+print("- Took", round(time.time() - start, 2), "s")
+
+print("> Preprocessing with lemminflect")
+start = time.time()
+df["abstract_lemminflect"] = lemmatize_lemminflect(df["abstract"], show_progressbar=True)
+print(df["abstract_lemminflect"])
+print("- Took", round(time.time() - start, 2), "s")
 
 # TODO: Index the dataset with Terrier, Indri, Elasticsearch, etc.
 # TODO: Try diff. approaches to optimize index and see impact of each approach
@@ -85,6 +104,20 @@ indexes = [
         "stopwords_removal": True,
         "tokeniser": "EnglishTokeniser",
         "store_positions": True
+    },
+    {
+        "name": "Lemminflect on abstracts",
+        "folder_name": "lemminflect_abstract",
+        "text": df["abstract_lemminflect"],
+        "metadata": [
+            df["cord_uid"],
+            df["title"]
+            #df["publish_time"],
+            #df["journal"])
+        ],
+        "stopwords_removal": True,
+        "tokeniser": "EnglishTokeniser", # UTFTokenizer
+        "store_positions": False
     },
 ]
 
