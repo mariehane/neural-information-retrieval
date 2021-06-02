@@ -1,6 +1,7 @@
 import zipfile
 import json
 import xmltodict
+import tqdm
 import numpy as np
 import pandas as pd
 
@@ -70,6 +71,23 @@ class Cord19Dataset():
             text = "\n".join(text_elems)
             return text
 
+    def get_dataframe(self, n_papers, show_progressbar=False):
+        df = self.metadata.loc[:n_papers, ["cord_uid","title","abstract","publish_time","journal"]]
+
+        def try_get_text(i):
+            try:
+                return self.get_paper_text(i)
+            except RuntimeError:
+                return None
+
+        iterator = map(try_get_text, range(n_papers))
+        if show_progressbar:
+            iterator = tqdm.tqdm(iterator, total=n_papers)
+        df["text"] = pd.DataFrame(iterator)
+
+        df = df.replace({np.nan: None})
+        df = df.astype(str)
+        return df
 
     @staticmethod
     def download(path):
