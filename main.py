@@ -6,11 +6,13 @@ import xmltodict
 import pytrec_eval
 import spacy
 import tqdm
+import optuna
 import numpy as np
 import pandas as pd
 import pyterrier as pt
 from pprint import pprint
 from pathlib import Path
+from sklearn.model_selection import train_test_split
 
 from data import Cord19Dataset
 from preprocess import lemmatize_wordnet, stem_porter, stem_snowball, lemmatize_lemminflect
@@ -112,15 +114,10 @@ topics = dataset.topics_train.rename(columns={
     "topic_number": "qid",
 }).drop(columns=["question", "narrative"])
 
-qrels = dataset.qrels_train.rename(columns={
-    "topic_number": "qid",
-    "cord_uid": "docno",
-    "judgement": "label"
-}).drop(columns=["iteration"]).astype({"qid": str})
-qrels = qrels.merge(df["docno"]) # drop qrels that are not in the dataset
+print("> Splitting qrels into train/validation set")
+qrels_train, qrels_valid = train_test_split(qrels)
+print("- train size:", len(qrels_train), "validation size:", len(qrels_valid))
 
-
-# TODO: Split into 2:1 train/validation folds
 # TODO: Once you find the best configuration, train on the full data
 # TODO: Tune and run BM25
 # TODO: Tune and run a language model, that ranks docs based on the probability of the model generating the query
@@ -140,6 +137,31 @@ qrels = qrels.merge(df["docno"]) # drop qrels that are not in the dataset
 #       - RankNet
 #       - LambdaMART
 #       - etc.
+
+index = indexes[1]
+
+def objective(trial):
+    c = trial.suggest_uniform('c', 0, 10)
+    k_1 = trial.suggest_uniform('k_1', 0, 10)
+    k_3 = trial.suggest_uniform('k_3', 0, 10)
+
+    bm25 = pt.BatchRetrieve(index.index, wmodel="BM25", controls={"c": c, "bm25.k_1": k_1, "bm25.k_3": k_3})
+    results = pt.Experiment(
+        retr_systems=[bm25],
+        names=['BM25'],
+        topics=topics,
+        qrels=qrels_valid,
+        eval_metrics=["map", "ndcg_cut_5", "ndcg_cut_10", "ndcg_cut_20"])
+
+    return results.loc[0, "map"]
+
+print()
+print(f"> Running optuna on index <{index.name}>")
+study = optuna.create_study(study_name="BM25 Tuning", direction='maximize')
+study.optimize(objective, n_trials=100)
+
+print("- Best params:")
+print(study.best_params)
 
 # 4. Evaluation
 # TODO: use trec-eval: https://github.com/usnistgov/trec_eval
