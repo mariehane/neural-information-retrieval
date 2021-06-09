@@ -31,26 +31,22 @@ print("> Preprocessing with NLTK lemmatizers")
 print("- Using WordNet Stemmer")
 start = time.time()
 df["abstract_wordnet"] = lemmatize_wordnet(df["abstract"], show_progressbar=True)
-print(df["abstract_wordnet"])
 print("- Took", round(time.time() - start, 2), "s")
 
 print("- Using Porter Stemmer")
 start = time.time()
 df["abstract_porter"] = stem_porter(df["abstract"], show_progressbar=True)
-print(df["abstract_porter"])
 print("- Took", round(time.time() - start, 2), "s")
 
 print("- Using Snowball Stemmer")
 start = time.time()
 df["abstract_snowball"] = stem_porter(df["abstract"], show_progressbar=True)
-print(df["abstract_snowball"])
 print("- Took", round(time.time() - start, 2), "s")
 
-print("> Preprocessing with lemminflect")
-start = time.time()
-df["abstract_lemminflect"] = lemmatize_lemminflect(df["abstract"], show_progressbar=True)
-print(df["abstract_lemminflect"])
-print("- Took", round(time.time() - start, 2), "s")
+#print("> Preprocessing with lemminflect")
+#start = time.time()
+#df["abstract_lemminflect"] = lemmatize_lemminflect(df["abstract"], show_progressbar=True)
+#print("- Took", round(time.time() - start, 2), "s")
 
 indexes = [
     TerrierIndex("Default, abstracts", 
