@@ -1,6 +1,6 @@
 numpy==1.20.2
 pandas==1.0.3
-torch==1.4.0
+torch==1.8.1
 torchaudio==0.8.0a0+e4e171a
 torchvision==0.9.1
 xmltodict==0.12.0
@@ -12,3 +12,6 @@ tqdm==4.60.0
 nltk==3.4
 textblob==0.15.3
 lemminflect==0.2.2
+optuna==2.3.0
+sentence-transformers==1.2.0
+transformers==4.6.1
