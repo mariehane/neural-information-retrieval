@@ -88,7 +88,26 @@ class Cord19Dataset():
         df = df.replace({np.nan: None})
         df = df.astype(str)
         return df
-
+    
     @staticmethod
     def download(path):
         pass # TODO: download from Git LFS or directly from CORD19 (may be missing qrels)
+
+def convert_qrels_to_pyterrier_format(qrels):
+    return qrels.rename(columns={
+        "topic_number": "qid",
+        "cord_uid": "docno",
+        "judgement": "label"
+    }).drop(columns=["iteration"]).astype({"qid": str})
+
+def convert_topics_to_pyterrier_format(topics, query_column="query"):
+    result = topics.drop(columns="narrative")
+    if query_column == "query":
+        result.drop(columns="question", inplace=True)
+    elif query_column == "question":
+        result.drop(columns="query", inplace=True)
+    result.rename(columns={
+        "topic_number": "qid",
+        query_column: "query"
+    }, inplace=True)
+    return result

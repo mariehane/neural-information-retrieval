@@ -14,13 +14,16 @@ from pprint import pprint
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 
-from data import Cord19Dataset
+from data import Cord19Dataset, convert_qrels_to_pyterrier_format, convert_topics_to_pyterrier_format
 from preprocess import lemmatize_wordnet, stem_porter, stem_snowball, lemmatize_lemminflect
 from index import TerrierIndex
 
+# parameters:
+n_papers = 5_000 #len(dataset.metadata)
+
+
 print("> Loading dataset")
 dataset = Cord19Dataset(base_dir='data', download=True)
-n_papers = 5_000 #len(dataset.metadata)
 
 print("> Creating simple dataframe...")
 df = dataset.get_dataframe(n_papers, show_progressbar=True)
@@ -95,20 +98,16 @@ for index in indexes:
     print("- Index size: ", index_size_mb, "MB")
     print()
 
-
-sys.exit(0)
+#sys.exit(0)
 
 # 2. Ranking models
-tf = pt.BatchRetrieve(index, wmodel="Tf")
-tf.search("algorithm")
+topics = convert_topics_to_pyterrier_format(dataset.topics_train, query_column="query")
 
-bm25 = pt.BatchRetrieve(index, wmodel="BM25")  # default parameters
-bm25v2 = pt.BatchRetrieve(index, wmodel="BM25", controls={"c": 0.1, "bm25.k_1": 2.0, "bm25.k_3": 10})
-bm25v3 = pt.BatchRetrieve(index, wmodel="BM25", controls={"c": 8, "bm25.k_1": 1.4, "bm25.k_3": 10})
-
-topics = dataset.topics_train.rename(columns={
-    "topic_number": "qid",
-}).drop(columns=["question", "narrative"])
+qrels = convert_qrels_to_pyterrier_format(dataset.qrels_train)
+print("> Dropping qrels that are not in the dataset")
+qrels = qrels.merge(df["cord_uid"], left_on="docno", right_on="cord_uid")
+print("- total qrels: ", len(dataset.qrels_train))
+print("- qrels in dataset: ", len(qrels))
 
 print("> Splitting qrels into train/validation set")
 qrels_train, qrels_valid = train_test_split(qrels)
