@@ -50,106 +50,50 @@ df["abstract_lemminflect"] = lemmatize_lemminflect(df["abstract"], show_progress
 print(df["abstract_lemminflect"])
 print("- Took", round(time.time() - start, 2), "s")
 
-# TODO: Index the dataset with Terrier, Indri, Elasticsearch, etc.
-# TODO: Try diff. approaches to optimize index and see impact of each approach
-#       - stemming
-#       - lemmatization
 indexes = [
-    {
-        "name": "Default, abstracts",
-        "folder_name": "default_abstract",
-        "text": df["abstract"],
-        "metadata": [
-            df["cord_uid"],
-            df["title"]
-            #df["publish_time"],
-            #df["journal"])
-        ],
-        "stopwords_removal": True,
-        "tokeniser": "EnglishTokeniser", # UTFTokenizer
-        "store_positions": False
-    },
-    {
-        "name": "Default, full paper text",
-        "folder_name": "default_text",
-        "text": df["text"],
-        "metadata": [
-            df["cord_uid"],
-            df["title"]
-        ],
-        "stopwords_removal": True,
-        "tokeniser": "EnglishTokeniser",
-        "store_positions": False
-    },
-    {
-        "name": "Abstracts, store positions",
-        "folder_name": "positions_abstract",
-        "text": df["abstract"],
-        "metadata": [
-            df["cord_uid"],
-            df["title"]
-        ],
-        "stopwords_removal": True,
-        "tokeniser": "EnglishTokeniser",
-        "store_positions": True
-    },
-    {
-        "name": "Full texts, store positions",
-        "folder_name": "positions_text",
-        "text": df["text"],
-        "metadata": [
-            df["cord_uid"],
-            df["title"]
-        ],
-        "stopwords_removal": True,
-        "tokeniser": "EnglishTokeniser",
-        "store_positions": True
-    },
-    {
-        "name": "Lemminflect on abstracts",
-        "folder_name": "lemminflect_abstract",
-        "text": df["abstract_lemminflect"],
-        "metadata": [
-            df["cord_uid"],
-            df["title"]
-            #df["publish_time"],
-            #df["journal"])
-        ],
-        "stopwords_removal": True,
-        "tokeniser": "EnglishTokeniser", # UTFTokenizer
-        "store_positions": False
-    },
+    TerrierIndex("Default, abstracts", 
+                 path="indexes/default_abstract",
+                 text=df["abstract"],
+                 docno=df["cord_uid"],
+                 metadata=[df["title"]]),
+    TerrierIndex("Default, full paper text", 
+                 path="indexes/default_text",
+                 text=df["text"],
+                 docno=df["cord_uid"],
+                 metadata=[df["title"]]),
+    TerrierIndex("Abstracts, store positions", 
+                 path="indexes/positions_abstract",
+                 text=df["abstract"],
+                 docno=df["cord_uid"],
+                 metadata=[df["title"]],
+                 store_positions=True),
+    TerrierIndex("Full texts, store positions", 
+                 path="indexes/positions_text",
+                 text=df["text"],
+                 docno=df["cord_uid"],
+                 metadata=[df["title"]],
+                 store_positions=True),
+    TerrierIndex("Porter stemmer on abstracts", 
+                 path="indexes/porter_abstract",
+                 text=df["abstract_porter"],
+                 docno=df["cord_uid"],
+                 metadata=[df["title"]],
+                 store_positions=True),
 ]
 
 print("> Indexing...")
-if not pt.started():
-    pt.init()
 
-for index_dict in indexes:
-    print("- Creating index:", index_dict["name"])
-    index_path = str(Path("./indexes") / index_dict["folder_name"])
-    print("- Directory:", index_path)
+for index in indexes:
+    print("- Creating index:", index.name)
+    print("- Directory:", index.path)
 
-    indexer = pt.DFIndexer("./" + index_path, overwrite=True, blocks=index_dict["store_positions"])
-    if not index_dict["stopwords_removal"]:
-        indexer.setProperty("termpipelines", "")
-    if index_dict["tokeniser"] != "EnglishTokeniser":
-        indexer.setProperty("tokeniser", index_dict["tokeniser"])
+    time_to_index = index.create()
+    n_docs, n_unique_terms, n_tokens, index_size_mb = index.get_stats()
 
-    start = time.time()
-    index_ref = indexer.index(index_dict["text"], *index_dict["metadata"])
-    end = time.time()
-
-    index = pt.IndexFactory.of(index_ref)
-    stats = index.getCollectionStatistics()
-    print("- Time to index:", round(end-start, 2), "s")
-    print("- No. of docs indexed:", stats.numberOfDocuments)
-    print("- No. of unique terms:", stats.numberOfUniqueTerms)
-    print("- Total no. of terms:", stats.numberOfTokens)
-
-    index_size = sum(f.stat().st_size for f in Path(index_path).glob('**/*') if f.is_file())
-    index_size_mb = round(index_size / 1024**2, 1)
-
+    print("- Time to index:", time_to_index, "s")
+    print("- No. of docs indexed:", n_docs)
+    print("- No. of unique terms:", n_unique_terms)
+    print("- Total no. of terms:", n_tokens)
     print("- Index size: ", index_size_mb, "MB")
     print()
 
@@ -205,9 +149,28 @@ qrels = qrels.merge(df["docno"]) # drop qrels that are not in the dataset
 # 4.1 Real-World Use Case
 # TODO: Output submissions in the TREC run format
 
-pt.Experiment(
-    retr_systems=[tf, bm25, bm25v2, bm25v3],
-    names=['TF', 'BM25', 'BM25 (0.1, 2.0, 10)', 'BM25 (8, 1.4, 10)'],
-    topics=topics,
-    qrels=qrels,
-    eval_metrics=["map", "ndcg_cut_5", "ndcg_cut_10", "ndcg_cut_20"])
+# TODO: FILTER OUT DOCUMENTS FROM qrels_train!
+
+for index in indexes:
+    print("> Evaluating models on all indexes")
+    print("- Computing results for", index.name)
+    tf = pt.BatchRetrieve(index.index, wmodel="Tf")
+    bm25v1 = pt.BatchRetrieve(index.index, wmodel="BM25")  # default parameters
+    bm25v2 = pt.BatchRetrieve(index.index, wmodel="BM25", controls={"c": 0.1, "bm25.k_1": 2.0, "bm25.k_3": 10})
+    bm25v3 = pt.BatchRetrieve(index.index, wmodel="BM25", controls={"c": 8, "bm25.k_1": 1.4, "bm25.k_3": 10})
+
+    bm25best = pt.BatchRetrieve(index.index, wmodel="BM25", controls={"c": study.best_params["c"], 
+                                                                    "bm25.k_1": study.best_params["k_1"],
+                                                                    "bm25.k_3": study.best_params["k_3"]})
+
+    results = pt.Experiment(
+        retr_systems=[tf, bm25v1, bm25v2, bm25v3, bm25best],
+        names=['TF', 'BM25v1', 'BM25v2', 'BM25v3', 'BM25 (grid search)'],
+        topics=topics,
+        qrels=qrels_valid,
+        eval_metrics=["map", "ndcg_cut_5", "ndcg_cut_10", "ndcg_cut_20"])
+
+    print(results)
+
+
+#sys.exit(0) # only doing evaluation at the veery end
