@@ -2,192 +2,343 @@ import sys
 import time
 import json
 import zipfile
+import argparse
 import xmltodict
 import pytrec_eval
 import spacy
 import tqdm
 import optuna
+import torch
 import numpy as np
 import pandas as pd
 import pyterrier as pt
+from datetime import datetime
 from pprint import pprint
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 
+if not pt.started():
+    pt.init(boot_packages=["com.github.terrierteam:terrier-prf:-SNAPSHOT"])
+
 from data import Cord19Dataset, convert_qrels_to_pyterrier_format, convert_topics_to_pyterrier_format
-from preprocess import lemmatize_wordnet, stem_porter, stem_snowball, lemmatize_lemminflect
+from preprocess import remove_stopwords, stem_porter, stem_snowball, lemmatize_wordnet, lemmatize_lemminflect, remove_duplicates, remove_without_title, remove_before
 from index import TerrierIndex
+from models import create_models, tune_bm25, GensimQueryExpander, DistilBertLM
+from evaluate import output_run
 
-# parameters:
-n_papers = 5_000 #len(dataset.metadata)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--compare-indexes", action='store_true')
+    parser.add_argument("--train-validate", action='store_true')
+    parser.add_argument("--produce-eval-runs", action='store_true')
+    parser.add_argument("--data_dir", type=str, default='data')
+    parser.add_argument("--n_papers", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=None)
+    config = parser.parse_args()
 
+    # FOR DEBUGGING
+    config.train_validate = True
+    config.n_papers = 5000
+    config.seed = 42
+    
+    if not config.compare_indexes and not config.train_validate and not config.produce_eval_runs:
+        parser.print_help()
+        sys.exit(0)
+    
+    path_data = Path(config.data_dir)
+    path_df = path_data / "df.csv"
 
-print("> Loading dataset")
-dataset = Cord19Dataset(base_dir='data', download=True)
+    if config.seed is not None:
+        torch.manual_seed(config.seed)
+        np.random.seed(config.seed)
+        #torch.use_deterministic_algorithms(True)
 
-print("> Creating simple dataframe...")
-df = dataset.get_dataframe(n_papers, show_progressbar=True)
-print(df)
+    print("> Loading dataset")
+    dataset = Cord19Dataset(base_dir=str(path_data))
+    if config.n_papers is None:
+        config.n_papers = len(dataset.metadata)
 
-print("> Preprocessing with NLTK lemmatizers")
+    if path_df.exists():
+        print("> Loading dataframe...")
+        df = pd.read_csv(str(path_df))
+        if len(df) > config.n_papers:
+            print(f"- dataframe has more papers than specified ({len(df)}), truncating...")
+            df = df[:config.n_papers]
+    else:
+        print("> Creating dataframe...")
+        df = dataset.get_dataframe(config.n_papers, show_progressbar=True)
+        df.to_csv(path_df)
+    print(df)
 
-print("- Using WordNet Stemmer")
-start = time.time()
-df["abstract_wordnet"] = lemmatize_wordnet(df["abstract"], show_progressbar=True)
-print("- Took", round(time.time() - start, 2), "s")
+    if config.compare_indexes:
+        print("> Preprocessing with NLTK")
+        print("- Removing stopwords from abstracts")
+        start = time.time()
+        df["abstract_nostopwords"] = remove_stopwords(df["abstract"], show_progressbar=True)
+        print("- Took", round(time.time() - start, 2), "s")
 
-print("- Using Porter Stemmer")
-start = time.time()
-df["abstract_porter"] = stem_porter(df["abstract"], show_progressbar=True)
-print("- Took", round(time.time() - start, 2), "s")
+        print("- Removing stopwords from texts")
+        start = time.time()
+        df["text_nostopwords"] = remove_stopwords(df["text"], show_progressbar=True)
+        print("- Took", round(time.time() - start, 2), "s")
 
-print("- Using Snowball Stemmer")
-start = time.time()
-df["abstract_snowball"] = stem_porter(df["abstract"], show_progressbar=True)
-print("- Took", round(time.time() - start, 2), "s")
+        print("- Using Porter Stemmer on abstracts")
+        start = time.time()
+        df["abstract_porter"] = stem_porter(df["abstract_nostopwords"], show_progressbar=True)
+        print("- Took", round(time.time() - start, 2), "s")
 
-#print("> Preprocessing with lemminflect")
-#start = time.time()
-#df["abstract_lemminflect"] = lemmatize_lemminflect(df["abstract"], show_progressbar=True)
-#print("- Took", round(time.time() - start, 2), "s")
+        print("- Using Porter Stemmer on full texts, no stopword removal")
+        start = time.time()
+        df["text_porter_stopwords"] = stem_porter(df["text"], show_progressbar=True)
+        print("- Took", round(time.time() - start, 2), "s")
 
-indexes = [
-    TerrierIndex("Default, abstracts", 
-                 path="indexes/default_abstract",
-                 text=df["abstract"],
-                 docno=df["cord_uid"],
-                 metadata=[df["title"]]),
-    TerrierIndex("Default, full paper text", 
-                 path="indexes/default_text",
-                 text=df["text"],
-                 docno=df["cord_uid"],
-                 metadata=[df["title"]]),
-    TerrierIndex("Abstracts, store positions", 
-                 path="indexes/positions_abstract",
-                 text=df["abstract"],
-                 docno=df["cord_uid"],
-                 metadata=[df["title"]],
-                 store_positions=True),
-    TerrierIndex("Full texts, store positions", 
-                 path="indexes/positions_text",
-                 text=df["text"],
-                 docno=df["cord_uid"],
-                 metadata=[df["title"]],
-                 store_positions=True),
-    TerrierIndex("Porter stemmer on abstracts", 
-                 path="indexes/porter_abstract",
-                 text=df["abstract_porter"],
-                 docno=df["cord_uid"],
-                 metadata=[df["title"]],
-                 store_positions=True),
-]
+        print("- Using Porter Stemmer on full texts")
+        start = time.time()
+        df["text_porter"] = stem_porter(df["text_nostopwords"], show_progressbar=True)
+        print("- Took", round(time.time() - start, 2), "s")
 
-print("> Indexing...")
+        print("- Using Snowball Stemmer")
+        start = time.time()
+        df["text_snowball"] = stem_porter(df["text_nostopwords"], show_progressbar=True)
+        print("- Took", round(time.time() - start, 2), "s")
 
-for index in indexes:
-    print("- Creating index:", index.name)
-    print("- Directory:", index.path)
+        print("- Using WordNet Lemmatizer")
+        start = time.time()
+        df["text_wordnet"] = lemmatize_wordnet(df["text_nostopwords"], show_progressbar=True)
+        print("- Took", round(time.time() - start, 2), "s")
 
-    time_to_index = index.create()
-    n_docs, n_unique_terms, n_tokens, index_size_mb = index.get_stats()
+        print("> Preprocessing with lemminflect")
+        start = time.time()
+        df["text_lemminflect"] = lemmatize_lemminflect(df["text_nostopwords"], show_progressbar=True)
+        print("- Took", round(time.time() - start, 2), "s")
+    print(df)
 
-    print("- Time to index:", time_to_index, "s")
-    print("- No. of docs indexed:", n_docs)
-    print("- No. of unique terms:", n_unique_terms)
-    print("- Total no. of terms:", n_tokens)
-    print("- Index size: ", index_size_mb, "MB")
-    print()
+    print("> Preprocessing...")
+    print("- Removing duplicates")
+    df = remove_duplicates(df)
+    #print("- Removing articles without title")
+    #df = remove_without_title(df)
+    #print("- Removing articles before 2000-01-01")
+    #df = remove_before(df, date=datetime(2000, 1, 1))
 
-#sys.exit(0)
+    indexes = [
+        TerrierIndex("Default, abstracts", 
+                    path="indexes/default_abstract",
+                    text=df["abstract"],
+                    docno=df["cord_uid"],
+                    metadata=[df["title"]]),
+        TerrierIndex("Default, full paper text", 
+                    path="indexes/default_text",
+                    text=df["text"],
+                    docno=df["cord_uid"],
+                    metadata=[df["title"]]),
+    ]
+    if config.compare_indexes:
+        indexes += [
+            TerrierIndex("Abstracts, store positions", 
+                        path="indexes/positions_abstract",
+                        text=df["abstract"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        store_positions=True),
+            TerrierIndex("Full texts, store positions", 
+                        path="indexes/positions_text",
+                        text=df["text"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        store_positions=True),
+            TerrierIndex("Abstracts, no stopword removal/stemming", 
+                        path="indexes/abstract_stopword",
+                        text=df["abstract"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        store_positions=False,
+                        remove_stopwords=True,
+                        stem=None),
+            TerrierIndex("Abstracts, store positions, no stopword removal/stemming", 
+                        path="indexes/positions_abstract_stopword",
+                        text=df["abstract"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        store_positions=True,
+                        remove_stopwords=True,
+                        stem=None),
+            TerrierIndex("Texts, no stopword removal/stemming", 
+                        path="indexes/text_stopword",
+                        text=df["text"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        store_positions=False,
+                        remove_stopwords=False,
+                        stem=None),
+            TerrierIndex("Texts, stopword removal, no stemming", 
+                        path="indexes/text_stopword",
+                        text=df["text"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        store_positions=False,
+                        remove_stopwords=True,
+                        stem=None),
+            TerrierIndex("Texts, store positions, no stopword removal/stemming", 
+                        path="indexes/positions_text_stopword",
+                        text=df["text"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        store_positions=True,
+                        remove_stopwords=False,
+                        stem=None),
+            TerrierIndex("Porter stemmer on abstracts", 
+                        path="indexes/porter_abstract",
+                        text=df["abstract_porter"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        remove_stopwords=False,
+                        stem=None),
+            TerrierIndex("Porter stemmer on full texts", 
+                        path="indexes/porter_text",
+                        text=df["text_porter"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        remove_stopwords=False,
+                        stem=None),
+            TerrierIndex("Snowball stemmer on full texts", 
+                        path="indexes/snowball_text",
+                        text=df["text_snowball"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        remove_stopwords=False,
+                        stem=None),
+            TerrierIndex("WordNet lemmatizer on full texts", 
+                        path="indexes/wordnet_text",
+                        text=df["text_wordnet"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        remove_stopwords=False,
+                        stem=None),
+            TerrierIndex("Lemminflect on full texts", 
+                        path="indexes/lemminflect_text",
+                        text=df["text_lemminflect"],
+                        docno=df["cord_uid"],
+                        metadata=[df["title"]],
+                        remove_stopwords=False,
+                        stem=None),
+        ]
 
-# 2. Ranking models
-topics = convert_topics_to_pyterrier_format(dataset.topics_train, query_column="query")
+    print("> Indexing...")
+    for index in indexes:
+        if index.exists() and not config.compare_indexes:
+            print("- Loading index:", index.name)
+            index.load()
+        else:
+            print("- Creating index:", index.name)
+            print("- Directory:", index.path)
+            time_to_index = index.create()
+            print("- Time to index:", time_to_index, "s")
 
-qrels = convert_qrels_to_pyterrier_format(dataset.qrels_train)
-print("> Dropping qrels that are not in the dataset")
-qrels = qrels.merge(df["cord_uid"], left_on="docno", right_on="cord_uid")
-print("- total qrels: ", len(dataset.qrels_train))
-print("- qrels in dataset: ", len(qrels))
+        n_docs, n_unique_terms, n_tokens, index_size_mb = index.get_stats()
+        print("- No. of docs indexed:", n_docs)
+        print("- No. of unique terms:", n_unique_terms)
+        print("- Total no. of terms:", n_tokens)
+        print("- Index size: ", index_size_mb, "MB")
+        print()
 
-print("> Splitting qrels into train/validation set")
-qrels_train, qrels_valid = train_test_split(qrels)
-print("- train size:", len(qrels_train), "validation size:", len(qrels_valid))
+    # 2. Ranking models
+    topics_query = convert_topics_to_pyterrier_format(dataset.topics_train, query_column="query")
+    topics_question = convert_topics_to_pyterrier_format(dataset.topics_train, query_column="question")
 
-# TODO: Once you find the best configuration, train on the full data
-# TODO: Tune and run BM25
-# TODO: Tune and run a language model, that ranks docs based on the probability of the model generating the query
-# TODO: Try some rank fusion approaches to combined different retrieval model results.
-#       - CombSum
-#       - CombMNZ
-#       - BordaCount
-#       - etc.
-# TODO: Expand with even more complex ideas of your own.
+    if config.compare_indexes or config.train_validate:
+        qrels = convert_qrels_to_pyterrier_format(dataset.qrels_train)
+        print("> Dropping qrels that are not in the dataset")
+        qrels = qrels.merge(df["cord_uid"], left_on="docno", right_on="cord_uid")
+        print("- total qrels: ", len(dataset.qrels_train))
+        print("- qrels in dataset: ", len(qrels))
 
+        print("> Splitting qrels into train/validation set")
+        # TODO: Should I split by the topics instead?
+        qrels_train, qrels_valid = train_test_split(qrels, random_state=config.seed)
+        print("- train size:", len(qrels_train), "validation size:", len(qrels_valid))
 
-# 3. Advanced Topics in Information Retrieval
-# TODO: Use word embeddings to do query expansion as done by Kuzi et al. 
-# TODO: Use BM25 or something similar to generate an initial ranking, and then re-rank the top K documents using contextual embeddings. 
-# TODO: Look at recent approaches proposed for the TREC-COVID track and evaluate their approaches (no need to reimplement/retrain models, just evaluate them) 
-# TODO: Tune and run at least 1 learning-to-rank approach
-#       - RankNet
-#       - LambdaMART
-#       - etc.
+    if config.compare_indexes:
+        for i, index in enumerate(indexes):
+            topics_compare_idx = topics_query.copy()
+            if i == 9:
+                topics_compare_idx["query"] = stem_porter(topics_compare_idx["query"])
+            elif i == 10:
+                topics_compare_idx["query"] = stem_snowball(topics_compare_idx["query"])
+            elif i == 11:
+                topics_compare_idx["query"] = lemmatize_wordnet(topics_compare_idx["query"])
+            elif i == 12:
+                topics_compare_idx["query"] = lemmatize_lemminflect(topics_compare_idx["query"])
+            print("Running simple BM25 on index:", index.name)
+            model = pt.BatchRetrieve(index.index, wmodel="BM25")
+            results = pt.Experiment(
+                retr_systems=[model],
+                names=["BM25"],
+                topics=topics_compare_idx,
+                qrels=qrels_train,
+                eval_metrics=["map", "ndcg_cut_5", "ndcg_cut_10", "ndcg_cut_20", "mrt"])
+            print(results)
 
-index = indexes[1]
+    if config.train_validate:
+        # TODO: Try some rank fusion approaches to combined different retrieval model results.
+        #       - CombMNZ
+        #       - BordaCount
+        #       - etc.
 
-def objective(trial):
-    c = trial.suggest_uniform('c', 0, 10)
-    k_1 = trial.suggest_uniform('k_1', 0, 10)
-    k_3 = trial.suggest_uniform('k_3', 0, 10)
+        # 3. Advanced Topics in Information Retrieval
+        # TODO: Use word embeddings to do query expansion as done by Kuzi et al. 
+        # TODO: Look at recent approaches proposed for the TREC-COVID track and evaluate their approaches (no need to reimplement/retrain models, just evaluate them) 
+        # TODO: Tune and run at least 1 learning-to-rank approach
+        #       - RankNet
+        #       - LambdaMART
+        #       - etc.
 
-    bm25 = pt.BatchRetrieve(index.index, wmodel="BM25", controls={"c": c, "bm25.k_1": k_1, "bm25.k_3": k_3})
-    results = pt.Experiment(
-        retr_systems=[bm25],
-        names=['BM25'],
-        topics=topics,
-        qrels=qrels_valid,
-        eval_metrics=["map", "ndcg_cut_5", "ndcg_cut_10", "ndcg_cut_20"])
+        # 4. Evaluation
+        # TODO: use trec-eval: https://github.com/usnistgov/trec_eval
+        # TODO: possibly report more metrics
+        
+        models = create_models(indexes[0], indexes[1], topics_query, qrels_train, seed=config.seed, verbose=True)
 
-    return results.loc[0, "map"]
+        print("> Evaluating systems on train qrels")
+        results = pt.Experiment(
+            retr_systems=models.values(),
+            names=models.keys(),
+            topics=topics_query,
+            qrels=qrels_train,
+            eval_metrics=["map", "ndcg_cut_5", "ndcg_cut_10", "ndcg_cut_20", "mrt"])
+        print("Train results:")
+        print(results)
 
-print()
-print(f"> Running optuna on index <{index.name}>")
-study = optuna.create_study(study_name="BM25 Tuning", direction='maximize')
-study.optimize(objective, n_trials=100)
+        print("> Evaluating systems on validation qrels")
+        results = pt.Experiment(
+            retr_systems=models.values(),
+            names=models.keys(),
+            topics=topics_query,
+            qrels=qrels_valid,
+            eval_metrics=["map", "ndcg_cut_5", "ndcg_cut_10", "ndcg_cut_20", "mrt"])
 
-print("- Best params:")
-print(study.best_params)
+        print("Validation results:")
+        print(results)
 
-# 4. Evaluation
-# TODO: use trec-eval: https://github.com/usnistgov/trec_eval
-# TODO: Report MAP and NDCG at cut-offs of 5, 10, 20.
-# TODO: possibly report more metrics
-# TODO: report mean response times of your systems
-# 4.1 Real-World Use Case
-# TODO: Output submissions in the TREC run format
+    # 4.1 Real-World Use Case
+    if config.produce_eval_runs:
+        topics_query = convert_topics_to_pyterrier_format(dataset.topics_test, query_column="query")
+        topics_question = convert_topics_to_pyterrier_format(dataset.topics_test, query_column="question")
+        topics_question["query"] = topics_question["query"].str.replace("?","")
 
-# TODO: FILTER OUT DOCUMENTS FROM qrels_train!
+        print("> Retraining on full data")
+        models = create_models(indexes[0], indexes[1], topics_query, qrels, seed=config.seed, verbose=True)
 
-for index in indexes:
-    print("> Evaluating models on all indexes")
-    print("- Computing results for", index.name)
-    tf = pt.BatchRetrieve(index.index, wmodel="Tf")
-    bm25v1 = pt.BatchRetrieve(index.index, wmodel="BM25")  # default parameters
-    bm25v2 = pt.BatchRetrieve(index.index, wmodel="BM25", controls={"c": 0.1, "bm25.k_1": 2.0, "bm25.k_3": 10})
-    bm25v3 = pt.BatchRetrieve(index.index, wmodel="BM25", controls={"c": 8, "bm25.k_1": 1.4, "bm25.k_3": 10})
+        print("> Generating final run files...")
+        # output top 1000 (at most) documents
+        for model_name in models:
+            model = models[model_name]
+            model_id = model_name.lower().replace(' ', '_')
+            path_query = Path("runs", f"dvf159.{model_id}.query")
+            path_question = Path("runs", f"dvf159.{model_id}.question")
+            print(f"Outputting model '{model_name}' to {path_query} and {path_question}")
+            output_run(model, model_id, topics_query, 'dvf159', str(path_query), n_docs_per_topic=1000, filter_out=dataset.qrels_train.cord_uid)
+            output_run(model, model_id, topics_question, 'dvf159', str(path_question), n_docs_per_topic=1000, filter_out=dataset.qrels_train.cord_uid)
 
-    bm25best = pt.BatchRetrieve(index.index, wmodel="BM25", controls={"c": study.best_params["c"], 
-                                                                    "bm25.k_1": study.best_params["k_1"],
-                                                                    "bm25.k_3": study.best_params["k_3"]})
-
-    results = pt.Experiment(
-        retr_systems=[tf, bm25v1, bm25v2, bm25v3, bm25best],
-        names=['TF', 'BM25v1', 'BM25v2', 'BM25v3', 'BM25 (grid search)'],
-        topics=topics,
-        qrels=qrels_valid,
-        eval_metrics=["map", "ndcg_cut_5", "ndcg_cut_10", "ndcg_cut_20"])
-
-    print(results)
-
-
-#sys.exit(0) # only doing evaluation at the veery end
+if __name__=="__main__":
+    main()

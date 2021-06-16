@@ -8,14 +8,10 @@ import pandas as pd
 from pathlib import Path
 
 class Cord19Dataset():
-    def __init__(self, base_dir, download=False):
+    def __init__(self, base_dir):
         self.base_dir = Path(base_dir)
         if (not self.base_dir.exists()):
-            if (not download):
-                raise RuntimeError("CORD-19 Dataset not found!")
-
-            print(f"Directory for CORD-19 Dataset ('{base_dir}') does not exist. Downloading...")
-            Cord19Dataset.download(base_dir)
+            raise RuntimeError(f"CORD-19 Dataset not found at {base_dir}!")
 
         self.cord19_embeddings_path = self.base_dir / 'cord_19_embeddings.zip'
         self.document_parses_path = self.base_dir / 'document_parses.zip'
@@ -24,7 +20,7 @@ class Cord19Dataset():
         self.topics_train_path = self.base_dir / 'topics_train.xml'
         self.topics_test_path = self.base_dir / 'topics_test.xml'
 
-        self.metadata = pd.read_csv(self.metadata_path)
+        self.metadata = pd.read_csv(self.metadata_path, dtype=str)
         self.qrels_train = pd.read_csv(self.qrels_train_path, delimiter=' ', header=None)
         self.qrels_train.rename(columns={
             0: "topic_number",
@@ -85,7 +81,7 @@ class Cord19Dataset():
             iterator = tqdm.tqdm(iterator, total=n_papers)
         df["text"] = pd.DataFrame(iterator)
 
-        df = df.replace({np.nan: None})
+        df = df.replace({None: np.nan})
         df = df.astype(str)
         return df
     

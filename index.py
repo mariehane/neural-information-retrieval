@@ -28,7 +28,7 @@ class Index(ABC):
 
 class TerrierIndex(Index):
 
-    def __init__(self, name, path, text, docno, metadata, overwrite=True, remove_stopwords=True, store_positions=False):
+    def __init__(self, name, path, text, docno, metadata, overwrite=True, remove_stopwords=True, stem="porter", store_positions=False):
         self.name = name
         self.path = Path(path)
         self.text = text
@@ -44,8 +44,17 @@ class TerrierIndex(Index):
 
         self.indexer = pt.DFIndexer(indexer_path, overwrite=overwrite, blocks=store_positions)
 
-        if not remove_stopwords:
-            self.indexer.setProperty("termpipelines", "")
+        termpipelines = []
+        if remove_stopwords:
+            termpipelines.append("Stopwords")
+
+        if stem=="porter":
+            termpipelines.append("PorterStemmer")
+        elif stem=="snowball":
+            termpipelines.append("SnowballStemmer")
+        termpipelines = ",".join(termpipelines)
+        self.indexer.setProperty("termpipelines", termpipelines)
+        
         #if tokenizer != "EnglishTokeniser":
         #    self.indexer.setProperty("tokeniser", index_dict["tokeniser"])
 
@@ -53,7 +62,12 @@ class TerrierIndex(Index):
 
 
     def load(self):
-        index_ref = str(self.path / "data.properties")
+        index_ref = self.path / "data.properties"
+        if (not index_ref.is_absolute()):
+            index_ref = "./" + str(index_ref)
+        else:
+            index_ref = str(index_ref)
+
         self.index = pt.IndexFactory.of(index_ref)
     
     def create(self):
@@ -77,7 +91,7 @@ class TerrierIndex(Index):
         return n_docs, n_unique_terms, n_tokens, index_size_mb
 
     def exists(self):
-        return self.path.exists()
+        return (self.path / "data.properties").exists()
     
     def __str__(self):
         return f"TerrierIndex({self.index})"
