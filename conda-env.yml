@@ -1,4 +1,4 @@
-name: nir
+name: nir-dvf159
 channels:
   - conda-forge
   - defaults
