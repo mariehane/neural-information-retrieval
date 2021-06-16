@@ -27,21 +27,21 @@ from models import create_models, tune_bm25, GensimQueryExpander, DistilBertLM
 from evaluate import output_run
 
 def main():
-    parser = argparse.ArgumentParser(description="Main train/evaluation script.\n\nOne of --compare-indexes/--train-validate/--produce-eval-runs must be enabled")
-    parser.add_argument("--compare-indexes", action='store_true', help="enable comparison of various preprocessing/indexing methods")
-    parser.add_argument("--train-validate", action='store_true', help="enable training and validation of various information retrieval models")
-    parser.add_argument("--produce-eval-runs", action='store_true', help="enable creation of evaluation runs")
+    parser = argparse.ArgumentParser(description="one of '--compare-indexes', '--train-validate', or '--produce-eval-runs' must be enabled.")
+    parser.add_argument("--compare-indexes", action='store_true', help="compare various preprocessing/indexing methods")
+    parser.add_argument("--train-validate", action='store_true', help="train and validate various information retrieval models")
+    parser.add_argument("--produce-eval-runs", action='store_true', help="create final evaluation runs")
     parser.add_argument("--data_dir", type=str, default='data', help="directory to load/store data in")
     parser.add_argument("--runs_dir", type=str, default='runs', help="directory to store output runs in")
-    parser.add_argument("--indexes_dir", type=str, default='indexes', help="directory for all PyTerrier indexes")
+    #parser.add_argument("--indexes_dir", type=str, default='indexes', help="directory for all PyTerrier indexes")
     parser.add_argument("--n_papers", type=int, default=None, help="how many papers to use - if not specified then all are used")
     parser.add_argument("--seed", type=int, default=None, help="random seed - specify in order to have reproducable runs")
     config = parser.parse_args()
 
     # FOR DEBUGGING
-    config.train_validate = True
-    config.n_papers = 5000
-    config.seed = 42
+    #config.train_validate = True
+    #config.n_papers = 5000
+    #config.seed = 42
     
     if not config.compare_indexes and not config.train_validate and not config.produce_eval_runs:
         parser.print_help()

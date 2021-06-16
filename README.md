@@ -47,6 +47,7 @@ The comparison of various stemmers/lemmatizers were generated with the following
 ```
 python main.py --compare-indexes --n_papers 5000 --seed 42
 ```
+
 This will select the first 5000 papers, apply various preprocessing steps to create a large number of different indexes, and finally evaluate a simple BM25 model on each index. 
 
 ## Advanced use
