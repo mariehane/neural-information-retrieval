@@ -245,7 +245,6 @@ def main():
         print("- Index size: ", index_size_mb, "MB")
         print()
 
-    # 2. Ranking models
     topics_query = convert_topics_to_pyterrier_format(dataset.topics_train, query_column="query")
     topics_question = convert_topics_to_pyterrier_format(dataset.topics_train, query_column="question")
 
@@ -257,7 +256,6 @@ def main():
 
     if config.compare_indexes or config.train_validate:
         print("> Splitting qrels into train/validation set")
-        # TODO: Should I split by the topics instead?
         qrels_train, qrels_valid = train_test_split(qrels, random_state=config.seed)
         print("- train size:", len(qrels_train), "validation size:", len(qrels_valid))
 
@@ -283,23 +281,6 @@ def main():
             print(results)
 
     if config.train_validate:
-        # TODO: Try some rank fusion approaches to combined different retrieval model results.
-        #       - CombMNZ
-        #       - BordaCount
-        #       - etc.
-
-        # 3. Advanced Topics in Information Retrieval
-        # TODO: Use word embeddings to do query expansion as done by Kuzi et al. 
-        # TODO: Look at recent approaches proposed for the TREC-COVID track and evaluate their approaches (no need to reimplement/retrain models, just evaluate them) 
-        # TODO: Tune and run at least 1 learning-to-rank approach
-        #       - RankNet
-        #       - LambdaMART
-        #       - etc.
-
-        # 4. Evaluation
-        # TODO: use trec-eval: https://github.com/usnistgov/trec_eval
-        # TODO: possibly report more metrics
-        
         models = create_models(indexes[0], indexes[1], topics_query, qrels_train, seed=config.seed, verbose=True)
 
         print("> Evaluating systems on train qrels")

@@ -14,3 +14,5 @@ lemminflect==0.2.2
 optuna==2.3.0
 sentence-transformers==1.2.0
 transformers==4.6.1
+gensim==4.0.1
+lightgbm==3.2.1

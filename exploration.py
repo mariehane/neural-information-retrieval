@@ -60,7 +60,7 @@ text = "\n".join(text_elems)
 print("Length of chosen article:", len(text))
 
 # Check if there are any duplicates where only one has text
-dataset = Cord19Dataset(base_dir='data', download=True)
+dataset = Cord19Dataset(base_dir='data')
 path_df = Path("data/df.csv")
 if path_df.exists():
     print("> Loading simple dataframe...")
