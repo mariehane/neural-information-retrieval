@@ -27,13 +27,15 @@ from models import create_models, tune_bm25, GensimQueryExpander, DistilBertLM
 from evaluate import output_run
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--compare-indexes", action='store_true')
-    parser.add_argument("--train-validate", action='store_true')
-    parser.add_argument("--produce-eval-runs", action='store_true')
-    parser.add_argument("--data_dir", type=str, default='data')
-    parser.add_argument("--n_papers", type=int, default=None)
-    parser.add_argument("--seed", type=int, default=None)
+    parser = argparse.ArgumentParser(description="Main train/evaluation script.\n\nOne of --compare-indexes/--train-validate/--produce-eval-runs must be enabled")
+    parser.add_argument("--compare-indexes", action='store_true', help="enable comparison of various preprocessing/indexing methods")
+    parser.add_argument("--train-validate", action='store_true', help="enable training and validation of various information retrieval models")
+    parser.add_argument("--produce-eval-runs", action='store_true', help="enable creation of evaluation runs")
+    parser.add_argument("--data_dir", type=str, default='data', help="directory to load/store data in")
+    parser.add_argument("--runs_dir", type=str, default='runs', help="directory to store output runs in")
+    parser.add_argument("--indexes_dir", type=str, default='indexes', help="directory for all PyTerrier indexes")
+    parser.add_argument("--n_papers", type=int, default=None, help="how many papers to use - if not specified then all are used")
+    parser.add_argument("--seed", type=int, default=None, help="random seed - specify in order to have reproducable runs")
     config = parser.parse_args()
 
     # FOR DEBUGGING
@@ -58,13 +60,19 @@ def main():
     if config.n_papers is None:
         config.n_papers = len(dataset.metadata)
 
+    loaded_dataframe = False
     if path_df.exists():
         print("> Loading dataframe...")
         df = pd.read_csv(str(path_df))
+        loaded_dataframe = True
         if len(df) > config.n_papers:
             print(f"- dataframe has more papers than specified ({len(df)}), truncating...")
             df = df[:config.n_papers]
-    else:
+        elif len(df) < config.n_papers:
+            print(f"- cached dataframe has less papers than specified ({len(df)}), need to recreate dataframe")
+            loaded_dataframe = False
+
+    if not loaded_dataframe:
         print("> Creating dataframe...")
         df = dataset.get_dataframe(config.n_papers, show_progressbar=True)
         df.to_csv(path_df)
@@ -334,8 +342,8 @@ def main():
         for model_name in models:
             model = models[model_name]
             model_id = model_name.lower().replace(' ', '_')
-            path_query = Path("runs", f"dvf159.{model_id}.query")
-            path_question = Path("runs", f"dvf159.{model_id}.question")
+            path_query = Path(config.runs_dir, f"dvf159.{model_id}.query")
+            path_question = Path(config.runs_dir, f"dvf159.{model_id}.question")
             print(f"Outputting model '{model_name}' to {path_query} and {path_question}")
             output_run(model, model_id, topics_query, 'dvf159', str(path_query), n_docs_per_topic=1000, filter_out=dataset.qrels_train.cord_uid)
             output_run(model, model_id, topics_question, 'dvf159', str(path_question), n_docs_per_topic=1000, filter_out=dataset.qrels_train.cord_uid)
