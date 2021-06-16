@@ -37,11 +37,6 @@ def main():
     parser.add_argument("--n_papers", type=int, default=None, help="how many papers to use - if not specified then all are used")
     parser.add_argument("--seed", type=int, default=None, help="random seed - specify in order to have reproducable runs")
     config = parser.parse_args()
-
-    # FOR DEBUGGING
-    #config.train_validate = True
-    #config.n_papers = 5000
-    #config.seed = 42
     
     if not config.compare_indexes and not config.train_validate and not config.produce_eval_runs:
         parser.print_help()
@@ -254,13 +249,13 @@ def main():
     topics_query = convert_topics_to_pyterrier_format(dataset.topics_train, query_column="query")
     topics_question = convert_topics_to_pyterrier_format(dataset.topics_train, query_column="question")
 
-    if config.compare_indexes or config.train_validate:
-        qrels = convert_qrels_to_pyterrier_format(dataset.qrels_train)
-        print("> Dropping qrels that are not in the dataset")
-        qrels = qrels.merge(df["cord_uid"], left_on="docno", right_on="cord_uid")
-        print("- total qrels: ", len(dataset.qrels_train))
-        print("- qrels in dataset: ", len(qrels))
+    qrels = convert_qrels_to_pyterrier_format(dataset.qrels_train)
+    print("> Dropping qrels that are not in the dataset")
+    qrels = qrels.merge(df["cord_uid"], left_on="docno", right_on="cord_uid")
+    print("- total qrels: ", len(dataset.qrels_train))
+    print("- qrels in dataset: ", len(qrels))
 
+    if config.compare_indexes or config.train_validate:
         print("> Splitting qrels into train/validation set")
         # TODO: Should I split by the topics instead?
         qrels_train, qrels_valid = train_test_split(qrels, random_state=config.seed)
