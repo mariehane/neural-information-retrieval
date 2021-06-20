@@ -17,6 +17,7 @@ class Cord19Dataset():
         self.document_parses_path = self.base_dir / 'document_parses.zip'
         self.metadata_path = self.base_dir / 'metadata.csv'
         self.qrels_train_path = self.base_dir / 'qrels_train.txt'
+        self.qrels_test_path = self.base_dir / 'qrels_test.txt'
         self.topics_train_path = self.base_dir / 'topics_train.xml'
         self.topics_test_path = self.base_dir / 'topics_test.xml'
 
@@ -28,6 +29,19 @@ class Cord19Dataset():
             2: "cord_uid",
             3: "judgement",
         }, inplace=True)
+        
+        if self.qrels_test_path.exists():
+            self.has_test_qrels = True
+            self.qrels_test = pd.read_csv(self.qrels_test_path, delimiter=' ', header=None)
+            self.qrels_test.drop(columns=2, inplace=True)
+            self.qrels_test.rename(columns={
+                0: "topic_number",
+                1: "iteration",
+                2: "cord_uid",
+                3: "judgement",
+            }, inplace=True)
+        else:
+            self.has_test_qrels = False
 
         self.topics_train = self._get_topics_df(self.topics_train_path)
         self.topics_test = self._get_topics_df(self.topics_test_path)

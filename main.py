@@ -31,6 +31,7 @@ def main():
     parser.add_argument("--compare-indexes", action='store_true', help="compare various preprocessing/indexing methods")
     parser.add_argument("--train-validate", action='store_true', help="train and validate various information retrieval models")
     parser.add_argument("--produce-eval-runs", action='store_true', help="create final evaluation runs")
+    parser.add_argument("--evaluate", action='store_true', help="evaluate on test qrels")
     parser.add_argument("--data_dir", type=str, default='data', help="directory to load/store data in")
     parser.add_argument("--runs_dir", type=str, default='runs', help="directory to store output runs in")
     #parser.add_argument("--indexes_dir", type=str, default='indexes', help="directory for all PyTerrier indexes")
@@ -54,6 +55,9 @@ def main():
     dataset = Cord19Dataset(base_dir=str(path_data))
     if config.n_papers is None:
         config.n_papers = len(dataset.metadata)
+    if config.evaluate and not dataset.has_test_qrels:
+        print("Test qrels not found! Can't evaluate!")
+        sys.exit(1)
 
     loaded_dataframe = False
     if path_df.exists():
@@ -305,7 +309,7 @@ def main():
         print(results)
 
     # 4.1 Real-World Use Case
-    if config.produce_eval_runs:
+    if config.produce_eval_runs or config.evaluate:
         topics_query = convert_topics_to_pyterrier_format(dataset.topics_test, query_column="query")
         topics_question = convert_topics_to_pyterrier_format(dataset.topics_test, query_column="question")
         topics_question["query"] = topics_question["query"].str.replace("?","")
@@ -313,6 +317,7 @@ def main():
         print("> Retraining on full data")
         models = create_models(indexes[0], indexes[1], topics_query, qrels, seed=config.seed, verbose=True)
 
+    if config.produce_eval_runs:
         print("> Generating final run files...")
         # output top 1000 (at most) documents
         for model_name in models:
@@ -323,6 +328,18 @@ def main():
             print(f"Outputting model '{model_name}' to {path_query} and {path_question}")
             output_run(model, model_id, topics_query, 'dvf159', str(path_query), n_docs_per_topic=1000, filter_out=dataset.qrels_train.cord_uid)
             output_run(model, model_id, topics_question, 'dvf159', str(path_question), n_docs_per_topic=1000, filter_out=dataset.qrels_train.cord_uid)
+
+    if config.evaluate:
+        qrels_test = convert_qrels_to_pyterrier_format(dataset.qrels_test)
+        results = pt.Experiment(
+            retr_systems=models.values(),
+            names=models.keys(),
+            topics=topics_query,
+            qrels=qrels_test,
+            eval_metrics=["map", "ndcg_cut_5", "ndcg_cut_10", "ndcg_cut_20", "mrt"])
+
+        print("Evaluation results:")
+        print(results)
 
 if __name__=="__main__":
     main()
